@@ -1,0 +1,3 @@
+- insert:
+    - id: archived-conversations
+      name: '@local/dsh-archived-conversations'
