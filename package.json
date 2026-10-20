@@ -1,9 +1,15 @@
 {
   "name": "@local/dsh-archived-conversations",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
-  "description": "Web panel listing every archived Harness conversation, with restore and open actions.",
+  "description": "Web panel listing every archived Harness conversation with log sizes, restore, open, and move-to-trash actions.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yonder-Zenith/dsh-archived-conversations.git"
+  },
+  "homepage": "https://github.com/Yonder-Zenith/dsh-archived-conversations#readme",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",

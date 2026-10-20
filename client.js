@@ -11,7 +11,7 @@ window.__ModuleLoader__.load({
   factory(require) {
     const React = require('react');
     const h = React.createElement;
-    const { useMemo, useState } = React;
+    const { useEffect, useMemo, useRef, useState } = React;
 
     const NS = 'archived-conversations';
     const PANEL_ID = 'archived-conversations';
@@ -20,7 +20,7 @@ window.__ModuleLoader__.load({
     const en = {
       nav: 'Archived conversations',
       title: 'Archived conversations',
-      subtitle: 'Every archived conversation in one place. Restoring one returns it to the sidebar.',
+      subtitle: 'Every archived conversation in one place. Archived conversations stay hidden in the workspace sidebar.',
       search: 'Search archived conversations',
       searchPlaceholder: 'Search by title, workspace, or session ID',
       clear: 'Clear search',
@@ -40,6 +40,20 @@ window.__ModuleLoader__.load({
       restore: 'Restore',
       open: 'Open',
       restoring: 'Restoring…',
+      delete: 'Delete',
+      deleteTitle: 'Move to trash?',
+      deleteBody: 'The conversation will disappear from DSH and its archived list. Its log directory is moved to the DSH trash folder, so it can be restored manually; disk space is not freed until you clean the trash.',
+      deleteConfirm: 'Move to trash',
+      deleting: 'Moving…',
+      cancel: 'Cancel',
+      deleteSuccess: 'Conversation moved to the DSH trash folder.',
+      deletePartial: 'Log moved to trash, but removing the archive entry failed. Retry Delete to clear it.',
+      totalSize: 'Total log size',
+      sizeLabel: 'Log size (compressed, excluding attachments)',
+      sizeLoading: '…',
+      sizeUnknown: '—',
+      sizeUnavailable: 'Session log sizes are unavailable. Restart DSH to load the updated Host route.',
+      removeFailed: 'Could not move the conversation to trash: ',
       back: 'Back to conversation',
       errorRestore: 'Could not restore the conversation: ',
       errorOpen: 'Could not open the conversation: ',
@@ -48,7 +62,7 @@ window.__ModuleLoader__.load({
     const zh = {
       nav: '归档对话',
       title: '归档对话',
-      subtitle: '集中查看所有已归档的对话。恢复后，它会回到侧边栏原来的位置。',
+      subtitle: '集中查看所有已归档的对话。归档对话不会出现在工作区侧边栏中。',
       search: '搜索归档对话',
       searchPlaceholder: '搜索标题、工作区或会话 ID',
       clear: '清除搜索',
@@ -68,6 +82,20 @@ window.__ModuleLoader__.load({
       restore: '恢复',
       open: '打开',
       restoring: '恢复中…',
+      delete: '删除',
+      deleteTitle: '移到回收站？',
+      deleteBody: '对话将从 DSH 和归档列表中移除，日志目录会移到 DSH 回收站，可手动恢复；清空回收站前不会释放磁盘空间。',
+      deleteConfirm: '移到回收站',
+      deleting: '正在移动…',
+      cancel: '取消',
+      deleteSuccess: '对话已移到 DSH 回收站。',
+      deletePartial: '日志已移到回收站，但移除归档记录失败。再执行一次删除即可清理。',
+      totalSize: '日志总大小',
+      sizeLabel: '日志大小（压缩后，不含附件）',
+      sizeLoading: '…',
+      sizeUnknown: '—',
+      sizeUnavailable: '无法读取会话日志大小，请重启 DSH 以加载新的 Host 路由。',
+      removeFailed: '移到回收站失败：',
       back: '返回对话',
       errorRestore: '恢复对话失败：',
       errorOpen: '打开对话失败：',
@@ -195,8 +223,12 @@ window.__ModuleLoader__.load({
         background: var(--dsw-alias-bg-layer-2);
         color: var(--dsw-alias-label-primary);
       }
-      .ac-count {
+      .ac-stats {
+        display: flex;
         flex: none;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px 14px;
         color: var(--dsw-alias-label-secondary);
         font-size: 13px;
         line-height: 20px;
@@ -208,6 +240,7 @@ window.__ModuleLoader__.load({
         font-size: 12px;
         line-height: 18px;
       }
+      .ac-hint-error { color: var(--dsw-alias-state-error-primary); }
       .ac-error {
         margin: 0 0 14px;
         padding: 10px 12px;
@@ -331,6 +364,11 @@ window.__ModuleLoader__.load({
         font-variant-numeric: tabular-nums;
         opacity: 0.8;
       }
+      .ac-row-size {
+        color: var(--dsw-alias-label-secondary);
+        font-variant-numeric: tabular-nums;
+        opacity: 0.9;
+      }
       .ac-row-actions {
         display: flex;
         flex: none;
@@ -358,9 +396,93 @@ window.__ModuleLoader__.load({
         border: 0.5px solid var(--dsw-alias-brand-primary);
         color: var(--dsw-alias-brand-primary);
       }
+      .ac-button-danger {
+        border: 0.5px solid var(--dsw-alias-state-error-primary);
+        color: var(--dsw-alias-state-error-primary);
+      }
+      .ac-button-danger:hover:not(:disabled) {
+        background: var(--dsw-alias-bg-layer-2);
+        color: var(--dsw-alias-state-error-primary);
+      }
       .ac-button:disabled {
         opacity: 0.55;
         cursor: default;
+      }
+      .ac-notice {
+        margin: 0 0 14px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: var(--dsw-alias-bg-layer-1);
+        color: var(--dsw-alias-state-success-primary);
+        font-size: 13px;
+        line-height: 20px;
+        overflow-wrap: anywhere;
+      }
+      .ac-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: color-mix(in srgb, var(--dsw-alias-label-primary) 38%, transparent);
+      }
+      .ac-modal {
+        box-sizing: border-box;
+        width: min(440px, 100%);
+        max-height: min(80vh, 640px);
+        padding: 20px;
+        overflow: auto;
+        border: 0.5px solid var(--dsw-alias-border-l1);
+        border-radius: 16px;
+        background: var(--dsw-alias-bg-overlay);
+        color: var(--dsw-alias-label-primary);
+        box-shadow: 0 16px 48px color-mix(in srgb, var(--dsw-alias-label-primary) 22%, transparent);
+      }
+      .ac-modal h2 {
+        margin: 0 0 8px;
+        font-size: 16px;
+        line-height: 24px;
+        font-weight: 500;
+      }
+      .ac-modal-body {
+        margin: 0 0 14px;
+        color: var(--dsw-alias-label-secondary);
+        font-size: 13px;
+        line-height: 20px;
+      }
+      .ac-modal-subject {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        margin: 0 0 16px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: var(--dsw-alias-bg-layer-1);
+      }
+      .ac-modal-title {
+        font-size: 13px;
+        line-height: 20px;
+        font-weight: 500;
+        overflow-wrap: anywhere;
+      }
+      .ac-modal-size {
+        color: var(--dsw-alias-label-secondary);
+        font-size: 12px;
+        line-height: 18px;
+        font-variant-numeric: tabular-nums;
+      }
+      .ac-modal-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 4px;
+      }
+      .ac-modal-actions .ac-button {
+        height: 32px;
+        font-size: 13px;
       }
       .ac-page :focus-visible {
         outline: 2px solid var(--dsw-alias-brand-primary);
@@ -369,9 +491,11 @@ window.__ModuleLoader__.load({
       @media (max-width: 720px) {
         .ac-heading { padding-top: 20px; }
         .ac-toolbar { flex-wrap: wrap; }
-        .ac-count { width: 100%; }
+        .ac-stats { width: 100%; }
         .ac-row { flex-wrap: wrap; gap: 8px; }
         .ac-row-actions { width: 100%; justify-content: flex-end; }
+        .ac-modal-backdrop { padding: 16px; }
+        .ac-modal { padding: 16px; }
       }
     `;
 
@@ -466,6 +590,32 @@ window.__ModuleLoader__.load({
       return Number.isNaN(date.getTime()) ? t('unknownDate') : WHEN_FORMAT.format(date);
     }
 
+    function formatBytes(bytes) {
+      if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return null;
+      if (bytes < 1024) return `${bytes} B`;
+      const units = ['KB', 'MB', 'GB', 'TB'];
+      let value = bytes / 1024;
+      let unit = 0;
+      while (value >= 1024 && unit < units.length - 1) {
+        value /= 1024;
+        unit += 1;
+      }
+      return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+    }
+
+    function apiUrl(suffix = '') {
+      return new URL(`/api/archived-conversations${suffix}`, document.baseURI).toString();
+    }
+
+    function messageOf(error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+
+    function shortSessionId(id) {
+      const value = id.startsWith('session-') ? id.slice('session-'.length) : id;
+      return value.slice(0, 8);
+    }
+
     function rowsFor(ids, byId) {
       const rows = ids.map((id) => {
         const summary = byId[id];
@@ -483,17 +633,18 @@ window.__ModuleLoader__.load({
       return rows;
     }
 
-    function buildGroups(workspaceState, sessionState) {
+    function buildGroups(workspaceState, sessionState, removedIds) {
       const archived = workspaceState?.archivedSessionIds ?? [];
       const items = workspaceState?.items ?? [];
       const byId = sessionState?.byId ?? {};
+      const removed = removedIds ?? new Set();
       const archivedSet = new Set(archived);
       const placed = new Set();
       const groups = [];
       for (const workspace of items) {
         const ids = [];
         for (const id of workspace.sessionIds) {
-          if (!archivedSet.has(id) || placed.has(id)) continue;
+          if (!archivedSet.has(id) || placed.has(id) || removed.has(id)) continue;
           placed.add(id);
           ids.push(id);
         }
@@ -505,7 +656,7 @@ window.__ModuleLoader__.load({
           rows: rowsFor(ids, byId),
         });
       }
-      const rest = archived.filter((id) => !placed.has(id));
+      const rest = archived.filter((id) => !placed.has(id) && !removed.has(id));
       if (rest.length > 0) {
         groups.push({ key: UNGROUPED, title: '', path: null, rows: rowsFor(rest, byId) });
       }
@@ -537,17 +688,75 @@ window.__ModuleLoader__.load({
 
     function ArchivedPage(props) {
       const {
-        t, useWorkspaces, useSessions, restoreSession, openSession, backToConversation,
+        t, useWorkspaces, useSessions, restoreSession, openSession, refreshSessions, backToConversation,
       } = props;
       const workspaceState = useWorkspaces((state) => state);
       const sessionState = useSessions((state) => state);
       const [query, setQuery] = useState('');
       const [busyId, setBusyId] = useState(null);
       const [error, setError] = useState(null);
+      const [removedIds, setRemovedIds] = useState(() => new Set());
+      const [sizes, setSizes] = useState({
+        status: 'idle', byId: {}, totalBytes: 0, error: null,
+      });
+      const [confirming, setConfirming] = useState(null);
+      const [deleting, setDeleting] = useState(false);
+      const [deleteError, setDeleteError] = useState(null);
+      const [notice, setNotice] = useState(null);
+      const cancelRef = useRef(null);
+
+      const archivedIds = workspaceState.archivedSessionIds ?? [];
+      const archivedKey = archivedIds.join('\u0000');
+
+      useEffect(() => {
+        if (workspaceState.phase !== 'ready') return undefined;
+        if (archivedIds.length === 0) {
+          setSizes({ status: 'ready', byId: {}, totalBytes: 0, error: null });
+          return undefined;
+        }
+        const controller = new AbortController();
+        setSizes((previous) => ({ ...previous, status: 'loading', error: null }));
+        fetch(apiUrl(), { credentials: 'same-origin', signal: controller.signal })
+          .then(async (response) => {
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+            return body;
+          })
+          .then((body) => {
+            if (controller.signal.aborted) return;
+            const byId = {};
+            for (const session of body.sessions ?? []) byId[session.id] = session;
+            setSizes({
+              status: 'ready',
+              byId,
+              totalBytes: typeof body.totalBytes === 'number' ? body.totalBytes : 0,
+              error: null,
+            });
+          })
+          .catch((reason) => {
+            if (controller.signal.aborted) return;
+            setSizes({ status: 'error', byId: {}, totalBytes: 0, error: messageOf(reason) });
+          });
+        return () => controller.abort();
+        // The key is the archive-set content; the array identity may churn.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [archivedKey, workspaceState.phase]);
+
+      useEffect(() => {
+        if (confirming === null) return undefined;
+        cancelRef.current?.focus();
+        return undefined;
+      }, [confirming]);
+
+      useEffect(() => {
+        if (notice === null) return undefined;
+        const timer = window.setTimeout(() => setNotice(null), 6000);
+        return () => window.clearTimeout(timer);
+      }, [notice]);
 
       const groups = useMemo(
-        () => buildGroups(workspaceState, sessionState),
-        [workspaceState, sessionState],
+        () => buildGroups(workspaceState, sessionState, removedIds),
+        [workspaceState, sessionState, removedIds],
       );
       const filtered = useMemo(() => filterGroups(groups, query), [groups, query]);
       const total = groups.reduce((count, group) => count + group.rows.length, 0);
@@ -562,8 +771,7 @@ window.__ModuleLoader__.load({
         operation(id)
           .then(() => {})
           .catch((reason) => {
-            const detail = reason instanceof Error ? reason.message : String(reason);
-            setError(`${prefix}${detail}`);
+            setError(`${prefix}${messageOf(reason)}`);
           })
           .finally(() => { setBusyId(null); });
       };
@@ -572,6 +780,54 @@ window.__ModuleLoader__.load({
         await restoreSession(sessionId);
         openSession(sessionId);
       }, t('errorOpen'));
+
+      const sizeText = (id) => {
+        const text = formatBytes(sizes.byId[id]?.sizeBytes);
+        if (text !== null) return text;
+        return sizes.status === 'loading' ? t('sizeLoading') : t('sizeUnknown');
+      };
+      const totalSizeText = sizes.status === 'ready'
+        ? (formatBytes(sizes.totalBytes) ?? '0 B')
+        : sizes.status === 'loading' ? t('sizeLoading') : t('sizeUnknown');
+
+      const closeConfirm = () => {
+        if (deleting) return;
+        setConfirming(null);
+        setDeleteError(null);
+      };
+      const confirmDelete = async () => {
+        if (confirming === null || deleting) return;
+        setDeleting(true);
+        setDeleteError(null);
+        try {
+          const response = await fetch(apiUrl('/delete'), {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ sessionId: confirming.id }),
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+          setRemovedIds((previous) => {
+            const next = new Set(previous);
+            next.add(confirming.id);
+            return next;
+          });
+          setConfirming(null);
+          setNotice(body.unarchived === false ? t('deletePartial') : t('deleteSuccess'));
+          if (typeof refreshSessions === 'function') {
+            try {
+              await refreshSessions();
+            } catch (reason) {
+              console.warn('archived-conversations: session refresh failed after delete', reason);
+            }
+          }
+        } catch (reason) {
+          setDeleteError(`${t('removeFailed')}${messageOf(reason)}`);
+        } finally {
+          setDeleting(false);
+        }
+      };
 
       let content;
       if (pendingWorkspaces) {
@@ -605,20 +861,34 @@ window.__ModuleLoader__.load({
               h('time', {
                 dateTime: row.updatedAt > 0 ? new Date(row.updatedAt).toISOString() : undefined,
               }, formatWhen(row.updatedAt, t)),
-              h('span', { className: 'ac-row-id', title: row.id }, `#${row.id.slice(0, 8)}`))),
+              h('span', { className: 'ac-row-size', title: t('sizeLabel') }, sizeText(row.id)),
+              h('span', { className: 'ac-row-id', title: row.id }, `#${shortSessionId(row.id)}`))),
           h('div', { className: 'ac-row-actions' },
             h('button', {
               type: 'button',
               className: 'ac-button',
-              disabled: busyId !== null,
+              disabled: busyId !== null || deleting,
               onClick: () => restore(row.id),
             }, busyId === row.id ? t('restoring') : t('restore')),
             row.missing ? null : h('button', {
               type: 'button',
               className: 'ac-button ac-button-primary',
-              disabled: busyId !== null,
+              disabled: busyId !== null || deleting,
               onClick: () => open(row.id),
-            }, t('open')))))));
+            }, t('open')),
+            h('button', {
+              type: 'button',
+              className: 'ac-button ac-button-danger',
+              disabled: busyId !== null || deleting,
+              onClick: () => {
+                setDeleteError(null);
+                setConfirming({
+                  id: row.id,
+                  title: row.missing ? t('missingTitle') : (row.title || t('untitled')),
+                  sizeBytes: sizes.byId[row.id]?.sizeBytes ?? null,
+                });
+              },
+            }, t('delete')))))));
         }));
       }
 
@@ -651,18 +921,185 @@ window.__ModuleLoader__.load({
                   'aria-label': t('clear'),
                   onClick: () => { setQuery(''); },
                 }, h(CloseGlyph))),
-              h('span', { className: 'ac-count' }, `${total} ${t('count')}`)),
+              h('div', { className: 'ac-stats' },
+                h('span', null, `${total} ${t('count')}`),
+                h('span', { title: t('sizeLabel') }, `${t('totalSize')} ${totalSizeText}`))),
+            sizes.status === 'error' && total > 0 && h('p', {
+              className: 'ac-hint ac-hint-error',
+              role: 'status',
+              title: sizes.error ?? undefined,
+            }, t('sizeUnavailable')),
             workspaceState.state === 'error' && h('p', {
               className: 'ac-error',
               role: 'alert',
             }, `${t('failed')}${workspaceState.error?.message ? ` ${workspaceState.error.message}` : ''}`),
             error !== null && h('p', { className: 'ac-error', role: 'alert' }, error),
+            notice !== null && h('p', { className: 'ac-notice', role: 'status' }, notice),
             pendingDetails && h('p', { className: 'ac-hint', role: 'status' }, t('loadingDetails')),
-            content)));
+            content)),
+        confirming !== null && h('div', {
+          className: 'ac-modal-backdrop',
+          onMouseDown: (event) => {
+            if (event.target === event.currentTarget) closeConfirm();
+          },
+        },
+        h('div', {
+          className: 'ac-modal',
+          role: 'dialog',
+          'aria-modal': 'true',
+          'aria-labelledby': 'ac-delete-title',
+          onKeyDown: (event) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            closeConfirm();
+          },
+        },
+        h('h2', { id: 'ac-delete-title' }, t('deleteTitle')),
+        h('p', { className: 'ac-modal-body' }, t('deleteBody')),
+        h('div', { className: 'ac-modal-subject' },
+          h('strong', { className: 'ac-modal-title' }, confirming.title),
+          h('span', { className: 'ac-modal-size' }, formatBytes(confirming.sizeBytes) ?? t('sizeUnknown'))),
+        deleteError !== null && h('p', { className: 'ac-error', role: 'alert' }, deleteError),
+        h('div', { className: 'ac-modal-actions' },
+          h('button', {
+            ref: cancelRef,
+            type: 'button',
+            className: 'ac-button',
+            disabled: deleting,
+            onClick: closeConfirm,
+          }, t('cancel')),
+          h('button', {
+            type: 'button',
+            className: 'ac-button ac-button-danger',
+            disabled: deleting,
+            onClick: confirmDelete,
+          }, deleting ? t('deleting') : t('deleteConfirm'))))));
     }
 
     function PanelIcon({ size }) {
       return h(ArchiveGlyph, { size: size || 16 });
+    }
+
+    /**
+     * The shipped Workspace browser keeps its archived-visibility choice in a
+     * private viewing store (`archivedFilter`). That store has no slot, so the
+     * only plugin-level way to make this plugin the sole archive viewer is to
+     * keep the choice on its default "hide" value. The slot ledger exposes the
+     * browser's store seat, and that handle's `create()` returns the same live
+     * instance the browser renders. Coercing the one action that writes the
+     * field (and re-asserting it when a previously captured action reference
+     * changes it) keeps archived rows out of the sidebar, its search, and its
+     * archived-only view while this plugin keeps its own archive list.
+     */
+    function installWorkspaceArchiveGate(ctx) {
+      let active = null;
+
+      const openArchivePanel = () => {
+        try {
+          ctx.layout.selectPanel(PANEL_ID);
+        } catch (error) {
+          console.warn('archived-conversations: could not open the archive panel', error);
+        }
+      };
+
+      const restore = () => {
+        if (active === null) return;
+        if (active.patched !== null
+          && active.instance.actions.setArchivedFilter === active.patched) {
+          try {
+            active.instance.actions.setArchivedFilter = active.original;
+          } catch (error) {
+            console.warn('archived-conversations: could not restore workspace archive filter', error);
+          }
+        }
+        try {
+          active.unsubscribe();
+        } catch (error) {
+          console.warn('archived-conversations: could not release workspace archive gate', error);
+        }
+        active = null;
+      };
+
+      const sync = () => {
+        const entries = typeof ctx.slots.entriesOfSlot === 'function'
+          ? ctx.slots.entriesOfSlot('sidebar.workspaces')
+          : ctx.slots.entries('sidebar.workspaces');
+        const entry = entries.find((candidate) => (
+          candidate.store !== undefined
+          && typeof candidate.store.create === 'function'
+        ));
+        if (entry === undefined) return;
+
+        let instance;
+        try {
+          instance = entry.store.create();
+        } catch (error) {
+          console.warn('archived-conversations: could not open workspace view store', error);
+          return;
+        }
+        if (typeof instance?.actions?.setArchivedFilter !== 'function') return;
+        if (active !== null
+          && active.instance === instance
+          && (active.patched === null
+            || instance.actions.setArchivedFilter === active.patched)) return;
+
+        restore();
+        const original = instance.actions.setArchivedFilter;
+        const hide = () => {
+          try {
+            original('default');
+          } catch (error) {
+            console.warn('archived-conversations: could not hide workspace archives', error);
+          }
+        };
+        const patched = (filter) => {
+          if (active === null || active.patched !== patched) {
+            try {
+              original(filter);
+            } catch (error) {
+              console.warn('archived-conversations: could not update workspace archive filter', error);
+            }
+            return;
+          }
+          // The workspace's own "show/only archived" affordances route to the
+          // plugin panel instead of revealing archived rows in the sidebar.
+          if (filter === 'show' || filter === 'only') openArchivePanel();
+          hide();
+        };
+        let installedPatch = null;
+        try {
+          instance.actions.setArchivedFilter = patched;
+          installedPatch = patched;
+        } catch (error) {
+          console.warn('archived-conversations: using the state fallback for workspace archives', error);
+        }
+        hide();
+        const unsubscribe = typeof instance.subscribe === 'function'
+          ? instance.subscribe(() => {
+            const state = instance.getSnapshot();
+            if ((state?.archivedFilter ?? 'default') !== 'default') {
+              // A previously captured action reference can bypass the patched
+              // action; hide again and route that request to the plugin panel.
+              hide();
+              openArchivePanel();
+            }
+          })
+          : () => {};
+        active = { instance, original, patched: installedPatch, unsubscribe };
+      };
+
+      sync();
+      const offMutate = typeof ctx.slots.onMutate === 'function'
+        ? ctx.slots.onMutate((key) => { if (key === 'sidebar.workspaces') sync(); })
+        : () => {};
+      const offSubscribe = typeof ctx.slots.subscribe === 'function'
+        ? ctx.slots.subscribe('sidebar.workspaces', sync)
+        : () => {};
+      return () => {
+        offMutate();
+        offSubscribe();
+        restore();
+      };
     }
 
     function apply(ctx) {
@@ -679,9 +1116,22 @@ window.__ModuleLoader__.load({
         return () => { style.remove(); };
       }, 'archived-conversations: styles');
 
+      ctx.effect(
+        () => {
+          try {
+            return installWorkspaceArchiveGate(ctx);
+          } catch (error) {
+            console.warn('archived-conversations: workspace archive gate disabled', error);
+            return () => {};
+          }
+        },
+        'archived-conversations: workspace archive gate',
+      );
+
       const pageInjected = () => ({
         restoreSession: (sessionId) => ctx.workspaces.unarchiveSession(sessionId),
         openSession: (sessionId) => { ctx.uiWorkspace.openSession(sessionId); },
+        refreshSessions: () => ctx.sessions.refresh(),
         backToConversation: () => { ctx.layout.selectPanel(null); },
       });
 

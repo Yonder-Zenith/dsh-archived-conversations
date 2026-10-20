@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Archived Conversations",
-    "description": "Browse every archived conversation in one place, then restore or open it."
+    "description": "Browse archived conversations with their log sizes. Restore, open, or move them to the DSH trash; archived conversations stay hidden in the workspace sidebar."
   }
 }
