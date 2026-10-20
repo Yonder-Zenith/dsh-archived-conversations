@@ -30,16 +30,16 @@ DSH 自带的工作区浏览器把归档可见性保存在它自己的视图 sto
 ## 大小与删除
 
 - **大小**：读取 `ctx.sessionPersistence` 中每个会话当前日志世代的 `sizeBytes`，显示压缩后的日志大小；不含附件和历史世代。
-- **删除**：DSH 目前没有官方的会话删除 API。插件会把整个会话目录从 `<DSH_HOME>/sessions` 移到 `<DSH_HOME>/session-trash`，然后从归档集合中移除该 id，并刷新会话列表。
+- **删除**：DSH 目前没有官方的会话删除 API。Windows 上，插件通过 Windows Shell/VisualBasic API 把整个会话目录送进 **Windows 系统回收站**，可在资源管理器的回收站里恢复或清空；macOS/Linux 上移到 `<DSH_HOME>/session-trash`。随后从归档集合移除该 id，并刷新会话列表。
   - 删除只允许作用于「已归档且当前不活跃」的会话
   - 有子会话（subagent 后代）的会话会被拒绝，需先删除子会话，避免留下悬空的父引用
-  - 移到回收站是可恢复的；清空回收站前不会释放磁盘空间
-  - 恢复方式：把 `session-trash` 中对应目录移回原来的项目目录，再重启 DSH
+  - Windows：清空系统回收站即可释放磁盘空间；恢复时在回收站右键还原
+  - 其他平台：清空 `session-trash` 前不会释放磁盘空间；把对应目录移回原来的项目目录，再重启 DSH
 - 大小和删除通过 Host 半注册的两个认证路由提供：
   - `GET /api/archived-conversations`
   - `POST /api/archived-conversations/delete`
 
-> 如果部署把 `session-persistence-jsonl` 的 `root` 配置到了 `$DSH_HOME/sessions` 之外，删除会返回「session log directory not found」；需要把该 root 加进插件的路径解析后再使用。
+> 如果部署把 `session-persistence-jsonl` 的 `root` 配置到了非常规位置，删除会优先读取后端真实的 `root` 和 `locate()`；仍然找不到目录时会返回「session log directory not found」。
 
 ## 安装
 
@@ -62,8 +62,8 @@ target: <本目录的绝对路径>
 ## 隐私与安全
 
 - **只与本机 DSH 通信**：大小和删除通过同源的 Host 路由 `/api/archived-conversations` 完成，不访问外网，不上传、不外发任何对话内容。
-- **删除只移动本机文件**：日志目录只在本机的 `$DSH_HOME` 内移动，不经过网络。
-- **无第三方运行时依赖**：Host 只使用 Node 内置模块，Client 只使用 DSH 注入的 React；没有安装脚本，没有第三方运行时依赖。
+- **删除只在本机移动文件**：Windows 送入系统回收站，其他平台在 `$DSH_HOME` 内移动；都不经过网络。
+- **无第三方运行时依赖**：Host 只使用 Node 内置模块，Windows 删除时额外调用系统自带的 PowerShell；Client 只使用 DSH 注入的 React；没有安装脚本，没有第三方运行时依赖。
 - **无注入面**：对话标题等用户内容按纯文本渲染，不使用 `innerHTML`。
 - **无密钥**：仓库内不含任何 API Key 或凭据；也请在 Issue / PR 中避免粘贴密钥。
 
@@ -84,7 +84,7 @@ target: <本目录的绝对路径>
 
 「打开」会先执行恢复，再打开对话。DSH 中已归档的对话不能直接打开，因此这是最短的安全路径。
 
-「删除」不是永久擦除：日志目录会进入 `$DSH_HOME/session-trash`，方便手动恢复。需要永久释放空间时，请在确认不再需要后手动清空该目录。
+「删除」在 Windows 上进入**系统回收站**，可直接在资源管理器里恢复或清空；macOS/Linux 进入 `$DSH_HOME/session-trash`，需要手动清理。清空前不会释放空间。
 
 ## 许可证
 

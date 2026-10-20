@@ -6,19 +6,25 @@
  * authenticated connection routes:
  *
  * - GET  /api/archived-conversations        archived session log sizes
- * - POST /api/archived-conversations/delete move one archived session's log
- *                                           directory to the DSH trash folder
+ * - POST /api/archived-conversations/delete remove one archived session's log
+ *                                           directory
  *
  * DSH has no first-party session-deletion API (the persistence seam has no
- * delete). Deletion is therefore an explicit file move under $DSH_HOME: the
- * whole session directory leaves the persistence root, the archive id is
- * dropped through the registry, and the browser refreshes its session list.
- * The moved directory stays recoverable in $DSH_HOME/session-trash.
+ * delete). On Windows the directory is sent to the system Recycle Bin through
+ * the VisualBasic FileSystem API, so it participates in the normal Recycle
+ * Bin cleanup flow. Other platforms move it to a sibling session-trash
+ * directory. Either way the archive id is dropped through the registry and
+ * the browser refreshes its session list.
  */
+import { execFile } from 'node:child_process';
 import { mkdir, readdir, rename } from 'node:fs/promises';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { promisify } from 'node:util';
 
 export const inject = ['connection', 'sessions', 'sessionPersistence', 'sessionQuery', 'workspaceRegistry'];
+
+const execFileAsync = promisify(execFile);
 
 const LIST_PATH = '/api/archived-conversations';
 const DELETE_PATH = '/api/archived-conversations/delete';
@@ -50,20 +56,32 @@ function messageOf(error) {
 }
 
 /**
- * Resolve the DSH home and the directories this feature owns.
- * @returns paths, or null when neither environment variable is available.
+ * Resolve the persistence root and the sibling trash directory this feature
+ * owns. The shipped JSONL backend exposes its resolved `root`; environment
+ * variables are only a fallback because a packaged desktop Host need not
+ * inherit the launcher's DSH_HOME.
+ * @param ctx - Host context carrying the persistence service.
+ * @returns paths.
  */
-function dshPaths() {
-  const home = process.env.DSH_HOME !== undefined && process.env.DSH_HOME !== ''
-    ? resolve(process.env.DSH_HOME)
-    : process.env.DSH_PROFILE_DIR !== undefined && process.env.DSH_PROFILE_DIR !== ''
-      ? resolve(process.env.DSH_PROFILE_DIR, '..', '..')
-      : null;
-  if (home === null) return null;
+function dshPaths(ctx) {
+  let root = null;
+  const backendRoot = ctx.sessionPersistence?.root;
+  if (typeof backendRoot === 'string' && backendRoot !== '') {
+    root = resolve(backendRoot);
+  }
+  if (root === null) {
+    const home = process.env.DSH_HOME !== undefined && process.env.DSH_HOME !== ''
+      ? resolve(process.env.DSH_HOME)
+      : process.env.DSH_PROFILE_DIR !== undefined && process.env.DSH_PROFILE_DIR !== ''
+        ? resolve(process.env.DSH_PROFILE_DIR, '..', '..')
+        : join(homedir(), '.dsh');
+    root = join(home, 'sessions');
+  }
+  const parent = dirname(root);
   return {
-    home,
-    root: join(home, 'sessions'),
-    trash: join(home, 'session-trash'),
+    home: parent,
+    root,
+    trash: join(parent, 'session-trash'),
   };
 }
 
@@ -126,6 +144,74 @@ async function findSessionDirectories(root, sessionId) {
 }
 
 /**
+ * Whether one directory currently holds a canonical session log file.
+ * @param dir - candidate session directory.
+ * @returns whether the directory qualifies.
+ */
+async function hasSessionLog(dir) {
+  try {
+    const files = await readdir(dir);
+    return files.some((name) => LOG_FILE.test(name));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Ask the shipped JSONL backend for the exact current log path, when it
+ * exposes its diagnostic `locate` hook. This is more reliable than walking a
+ * root derived from environment variables.
+ * @param ctx - Host context.
+ * @param snapshot - persistence snapshot carrying the header.
+ * @returns the session-owned directory, or null when unavailable.
+ */
+async function locateSessionDirectory(ctx, snapshot) {
+  const locate = ctx.sessionPersistence?.locate;
+  if (typeof locate !== 'function') return null;
+  try {
+    const located = locate.call(ctx.sessionPersistence, snapshot.header);
+    if (located === null || typeof located !== 'object' || typeof located.path !== 'string') return null;
+    const dir = dirname(resolve(located.path));
+    return await hasSessionLog(dir) ? dir : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Send one directory to the Windows system Recycle Bin through the .NET
+ * VisualBasic FileSystem API. The path travels in the child environment, not
+ * in the command text, so a path can never become PowerShell syntax.
+ * @param dir - session directory to recycle.
+ */
+async function sendToWindowsRecycleBin(dir) {
+  const script = [
+    'Add-Type -AssemblyName Microsoft.VisualBasic;',
+    '$p = [Environment]::GetEnvironmentVariable("DSH_TRASH_PATH", "Process");',
+    'if ([string]::IsNullOrWhiteSpace($p)) { throw "DSH_TRASH_PATH is empty" };',
+    '[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($p, [Microsoft.VisualBasic.FileIO.UIOption]::OnlyErrorDialogs, [Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin)',
+  ].join(' ');
+  const powershell = join(
+    process.env.SystemRoot ?? 'C:\\Windows',
+    'System32',
+    'WindowsPowerShell',
+    'v1.0',
+    'powershell.exe',
+  );
+  await execFileAsync(powershell, [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy', 'Bypass',
+    '-Command', script,
+  ], {
+    env: { ...process.env, DSH_TRASH_PATH: dir },
+    windowsHide: true,
+    timeout: 30000,
+    maxBuffer: 1024 * 1024,
+  });
+}
+
+/**
  * List archived sessions with the selected log generation's byte size.
  * @param ctx - Host context.
  * @param request - authenticated route request.
@@ -137,20 +223,27 @@ async function listArchived(ctx, request) {
       return json({ error: 'session persistence is unavailable' }, 500);
     }
     const archived = archivedIds(ctx);
-    const snapshots = archived.length === 0
-      ? []
-      : await ctx.sessionPersistence.list({ signal: request.signal });
-    const byId = new Map();
-    for (const snapshot of snapshots) byId.set(String(snapshot.header.id), snapshot);
-    const sessions = archived.map((id) => {
-      const snapshot = byId.get(id);
-      return {
-        id,
-        sizeBytes: snapshot?.sizeBytes ?? null,
-        eventCount: snapshot?.eventCount ?? null,
-        formatStatus: snapshot?.formatStatus ?? null,
-      };
-    });
+    // Stat per id instead of one corpus-wide list: a single unreadable or
+    // migration-required log must not blank every size in the panel.
+    const sessions = await Promise.all(archived.map(async (id) => {
+      try {
+        const snapshot = await ctx.sessionPersistence.stat(id, { signal: request.signal });
+        return {
+          id,
+          sizeBytes: snapshot?.sizeBytes ?? null,
+          eventCount: snapshot?.eventCount ?? null,
+          formatStatus: snapshot?.formatStatus ?? null,
+        };
+      } catch (error) {
+        return {
+          id,
+          sizeBytes: null,
+          eventCount: null,
+          formatStatus: null,
+          error: messageOf(error),
+        };
+      }
+    }));
     const totalBytes = sessions.reduce(
       (sum, session) => sum + (typeof session.sizeBytes === 'number' ? session.sizeBytes : 0),
       0,
@@ -216,27 +309,36 @@ async function deleteArchived(ctx, request) {
       });
     }
 
-    const paths = dshPaths();
-    if (paths === null) return json({ error: 'DSH_HOME is not available' }, 500);
-    const directories = await findSessionDirectories(paths.root, sessionId);
-    if (directories.length === 0) {
-      return json({ error: `session log directory not found under ${paths.root}` }, 404);
+    const paths = dshPaths(ctx);
+    let source = await locateSessionDirectory(ctx, snapshot);
+    if (source === null) {
+      const directories = await findSessionDirectories(paths.root, sessionId);
+      if (directories.length === 0) {
+        return json({ error: `session log directory not found under ${paths.root}` }, 404);
+      }
+      if (directories.length > 1) {
+        return json({ error: 'multiple session log directories matched this id' }, 409);
+      }
+      source = directories[0];
     }
-    if (directories.length > 1) {
-      return json({ error: 'multiple session log directories matched this id' }, 409);
-    }
-    const source = directories[0];
     const inside = relative(paths.root, source);
     if (inside.startsWith('..') || isAbsolute(inside)) {
       return json({ error: 'session log directory escaped the persistence root' }, 500);
     }
 
-    await mkdir(paths.trash, { recursive: true });
-    const target = join(
-      paths.trash,
-      `${safeSegment(sessionId)}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    );
-    await rename(source, target);
+    let trashMode = 'folder';
+    let target = null;
+    if (process.platform === 'win32') {
+      await sendToWindowsRecycleBin(source);
+      trashMode = 'system';
+    } else {
+      await mkdir(paths.trash, { recursive: true });
+      target = join(
+        paths.trash,
+        `${safeSegment(sessionId)}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      );
+      await rename(source, target);
+    }
 
     let unarchived = true;
     let warning = null;
@@ -251,7 +353,8 @@ async function deleteArchived(ctx, request) {
       missing: false,
       sizeBytes: snapshot.sizeBytes ?? null,
       eventCount: snapshot.eventCount ?? null,
-      trashedTo: target,
+      trashMode,
+      ...(target === null ? {} : { trashedTo: target }),
       unarchived,
       ...(warning === null ? {} : { warning }),
     });

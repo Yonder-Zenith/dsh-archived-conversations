@@ -42,11 +42,13 @@ window.__ModuleLoader__.load({
       restoring: 'Restoring…',
       delete: 'Delete',
       deleteTitle: 'Move to trash?',
-      deleteBody: 'The conversation will disappear from DSH and its archived list. Its log directory is moved to the DSH trash folder, so it can be restored manually; disk space is not freed until you clean the trash.',
+      deleteBody: 'The conversation will disappear from DSH and its archived list. On Windows its log directory is moved to the system Recycle Bin, where you can restore or empty it; other platforms use the DSH trash folder. Disk space is freed only when the Recycle Bin is emptied.',
       deleteConfirm: 'Move to trash',
       deleting: 'Moving…',
       cancel: 'Cancel',
-      deleteSuccess: 'Conversation moved to the DSH trash folder.',
+      deleteSuccessSystem: 'Conversation moved to the Windows Recycle Bin.',
+      deleteSuccessFolder: 'Conversation moved to the DSH trash folder.',
+      deleteMissing: 'The session log was already gone; its archive entry was removed.',
       deletePartial: 'Log moved to trash, but removing the archive entry failed. Retry Delete to clear it.',
       totalSize: 'Total log size',
       sizeLabel: 'Log size (compressed, excluding attachments)',
@@ -84,11 +86,13 @@ window.__ModuleLoader__.load({
       restoring: '恢复中…',
       delete: '删除',
       deleteTitle: '移到回收站？',
-      deleteBody: '对话将从 DSH 和归档列表中移除，日志目录会移到 DSH 回收站，可手动恢复；清空回收站前不会释放磁盘空间。',
+      deleteBody: '对话将从 DSH 和归档列表中移除。Windows 会移到系统回收站，可在系统回收站中恢复或清空；其他平台移到 DSH 回收站。清空前不会释放磁盘空间。',
       deleteConfirm: '移到回收站',
       deleting: '正在移动…',
       cancel: '取消',
-      deleteSuccess: '对话已移到 DSH 回收站。',
+      deleteSuccessSystem: '对话已移到 Windows 系统回收站。',
+      deleteSuccessFolder: '对话已移到 DSH 回收站。',
+      deleteMissing: '会话日志已不存在，已从归档列表移除。',
       deletePartial: '日志已移到回收站，但移除归档记录失败。再执行一次删除即可清理。',
       totalSize: '日志总大小',
       sizeLabel: '日志大小（压缩后，不含附件）',
@@ -814,7 +818,9 @@ window.__ModuleLoader__.load({
             return next;
           });
           setConfirming(null);
-          setNotice(body.unarchived === false ? t('deletePartial') : t('deleteSuccess'));
+          if (body.unarchived === false) setNotice(t('deletePartial'));
+          else if (body.missing === true) setNotice(t('deleteMissing'));
+          else setNotice(t(body.trashMode === 'system' ? 'deleteSuccessSystem' : 'deleteSuccessFolder'));
           if (typeof refreshSessions === 'function') {
             try {
               await refreshSessions();
