@@ -30,6 +30,13 @@ target: <本目录的绝对路径>
 - 复用 DSH 已有的 Workspace / Session Controller Client 服务，不需要额外的 Host 服务
 - 依赖：`@deepseek-ai/dsh-client-ui-sidebar`、`@deepseek-ai/dsh-client-ui-layout`、`@deepseek-ai/dsh-client-ui-workspace`、`@deepseek-ai/dsh-client-ui-session`
 
+## 隐私与安全
+
+- **不联网**：插件只读取本机 DSH 的 Workspace / Session 客户端状态，不发起任何网络请求，不上传、不外发任何对话内容。
+- **无依赖**：没有第三方运行时依赖，也没有安装脚本（无 `postinstall`），不存在依赖投毒面。
+- **无注入面**：对话标题等用户内容按纯文本渲染，不使用 `innerHTML`，不存在脚本注入风险。
+- **无密钥**：仓库内不含任何 API Key 或凭据；也请在 Issue / PR 中避免粘贴密钥。
+
 ## 文件
 
 | 文件 | 用途 |
@@ -41,7 +48,12 @@ target: <本目录的绝对路径>
 | `locale/en.json` | 英文插件元数据 |
 | `locale/zh.json` | 中文插件元数据 |
 | `icon.svg` | 插件图标 |
+| `LICENSE` | MIT 许可证 |
 
 ## 说明
 
 「打开」会先执行恢复，再打开对话。DSH 中已归档的对话不能直接打开，因此这是最短的安全路径。
+
+## 许可证
+
+MIT，见 [LICENSE](LICENSE)。
